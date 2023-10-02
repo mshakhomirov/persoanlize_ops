@@ -1,0 +1,138 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: IAM Policies, and resources to work with Personalize.
+
+Parameters:
+
+  DataLocation:
+    Description: Data lake bucket with source data files.
+    Type: String
+    Default: s3://glue.staging.aws/transformed/
+  PersonalizeBucket:
+    Description: Data lake bucket with source data files.
+    Type: String
+    Default: s3://glue.staging.aws/
+  DatasetImportJobName:
+    Description: DatasetImportJob Name.
+    Type: String
+    Default: group-ratings-import-job-test-202304024-2
+
+Resources:
+
+### Personalize resources ###
+
+  PersonalizePolicy:
+    Type: AWS::IAM::Policy
+    DependsOn: PersonalizeRole
+    Properties:
+      Roles:
+        - !Ref PersonalizeRole
+      PolicyName: 'Personalize-policy'
+      PolicyDocument:
+        {
+          "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Sid": "",
+                    "Effect": "Allow",
+                    "Action": [
+                        "s3:GetObject",
+                        "s3:ListBucket",
+                        "s3:PutObject"
+                    ],
+                    "Resource": "*"
+                }
+          ]
+        }
+
+  PersonalizeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              Service:
+                - "personalize.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+
+  PersonalizeDatasetGroup:
+    Type: 'AWS::Personalize::DatasetGroup'
+    Properties:
+      Name: !Join 
+        - ''
+        - - !Ref 'AWS::StackName'
+          - '-personalize-dataset-group-test'
+
+  PersonalizeDatasetSchema:
+    Type: AWS::Personalize::Schema
+    Properties: 
+      # Domain: String
+      # Name: movie-ratings-schema-test-2-20230424
+      Name: !Join 
+        - ''
+        - - !Ref 'AWS::StackName'
+          - '-movie-ratings-schema-test'
+      Schema: "{\"type\":\"record\",\"name\":\"Interactions\",\"namespace\":\"com.amazonaws.personalize.schema\",\"fields\":[{\"name\":\"USER_ID\",\"type\":\"string\"},{\"name\":\"ITEM_ID\",\"type\":\"string\"},{\"name\":\"TIMESTAMP\",\"type\":\"long\"}],\"version\":\"1.0\"}"
+      # # or like so:
+      # Schema: >-
+      #   {"type": "record","name": "Interactions", "namespace":
+      #   "com.amazonaws.personalize.schema", "fields": [ { "name": "USER_ID",
+      #   "type": "string" }, { "name": "ITEM_ID", "type": "string" }, { "name":
+      #   "TIMESTAMP", "type": "long"}], "version": "1.0"}
+
+  PersonalizeDataset:
+    DependsOn: [PersonalizePolicy, PersonalizeRole, PersonalizeDatasetGroup, PersonalizeDatasetSchema]
+    Type: 'AWS::Personalize::Dataset'
+    Properties:
+      # Name: item-ratings-dataset
+      Name: !Join 
+        - ''
+        - - !Ref 'AWS::StackName'
+          - '-item-ratings-dataset'
+      DatasetType: Interactions
+      DatasetGroupArn: !GetAtt PersonalizeDatasetGroup.DatasetGroupArn
+      SchemaArn: !GetAtt PersonalizeDatasetSchema.SchemaArn
+      DatasetImportJob:
+        JobName: !Ref DatasetImportJobName # group-ratings-import-job-test-20230424
+        DataSource:
+          DataLocation: !Ref DataLocation
+        RoleArn: !GetAtt PersonalizeRole.Arn
+
+  PersonalizeSolution:
+    Type: AWS::Personalize::Solution
+    DependsOn: [PersonalizeDatasetGroup, PersonalizeDataset]
+    Properties: 
+      DatasetGroupArn: !GetAtt PersonalizeDatasetGroup.DatasetGroupArn
+      # EventType: String # The event type (for example, 'click' or 'like') that is used for training the model. If no eventType is provided, Amazon Personalize uses all interactions for training with equal weight regardless of type.
+      # Name: item-ratings-solution-test-2-20230424
+      Name: !Join 
+        - ''
+        - - !Ref 'AWS::StackName'
+          - '-item-ratings-solution-test'
+      # PerformAutoML: false
+      # PerformHPO: Boolean # Whether to perform hyperparameter optimization (HPO) on the chosen recipe. The default is false
+      RecipeArn: 'arn:aws:personalize:::recipe/aws-user-personalization' 
+      # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-personalize-solution-solutionconfig.html
+      # SolutionConfig: 
+      #   SolutionConfig
+
+Outputs:
+  PersonalizeSolutionArn:
+    Value: !GetAtt PersonalizeSolution.SolutionArn
+    Export:
+      Name: !Join 
+        - ''
+        - - !Ref 'AWS::StackName'
+          - '-PersonalizeSolutionArn'
+  PersonalizeRoleArn:
+    Value: !GetAtt PersonalizeRole.Arn
+    Export:
+      Name: !Join 
+        - ''
+        - - !Ref 'AWS::StackName'
+          - '-PersonalizeRoleArn'

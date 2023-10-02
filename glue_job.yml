@@ -1,0 +1,64 @@
+---
+    Description: "AWS Glue Job to prepare movielens dataset for AWS Personalize"
+    Parameters:
+      ScriptLocation:
+        Description: Data lake Glue bucket with source data files.
+        Type: String
+        Default: 's3://<YOUR_GLUE_BUCKET>/glue_scripts/glue_job_full_solution.py'
+      SourceDataBucketName:
+        Description: Data lake Glue bucket with source data files.
+        Type: String
+        Default: glue.staging.aws
+
+    Resources:
+      MyJobRole:
+        Type: AWS::IAM::Role
+        Properties:
+          ManagedPolicyArns: 
+            - arn:aws:iam::aws:policy/service-role/AWSGlueServiceRole
+          AssumeRolePolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              -
+                Effect: "Allow"
+                Principal:
+                  Service:
+                    - "glue.amazonaws.com"
+                Action:
+                  - "sts:AssumeRole"
+          Path: "/"
+          Policies:
+            -
+              PolicyName: "root"
+              PolicyDocument:
+                Version: "2012-10-17"
+                Statement:
+                  -
+                    Effect: "Allow"
+                    Action:
+                      - s3:*
+                      - s3-object-lambda:*
+                    Resource:
+                      - !Sub
+                        - arn:aws:s3:::${SourceDataBucketName}
+                        - SourceDataBucketName: !Ref SourceDataBucketName
+                      - !Sub
+                        - arn:aws:s3:::${SourceDataBucketName}/*
+                        - SourceDataBucketName: !Ref SourceDataBucketName
+
+     
+      MyJob:
+        Type: AWS::Glue::Job
+        Properties:
+          GlueVersion: '3.0'
+          Command:
+            Name: glueetl
+            PythonVersion: 3
+            ScriptLocation: !Ref ScriptLocation
+          # DefaultArguments:
+          #   "--job-bookmark-option": "job-bookmark-enable"
+          ExecutionProperty:
+            MaxConcurrentRuns: 2
+          MaxRetries: 0
+          Name: cf-job1
+          Role: !Ref MyJobRole

@@ -1,0 +1,108 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: AWS Glue S3 data lake stack.
+Parameters:
+
+  SourceDataBucketName:
+    Description: Data lake Glue bucket with source data files.
+    Type: String
+    Default: your.s3.bucket
+
+Resources:
+
+  DatalakeBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    Properties:
+      BucketName:
+        Ref: SourceDataBucketName
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: true
+        RestrictPublicBuckets: true
+
+  MyJobRole:
+    Type: AWS::IAM::Role
+    Properties:
+      ManagedPolicyArns: 
+        - arn:aws:iam::aws:policy/service-role/AWSGlueServiceRole
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Principal:
+              Service:
+                - "glue.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Path: "/"
+      Policies:
+        -
+          PolicyName: "root"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              -
+                Effect: "Allow"
+                Action:
+                  - s3:*
+                  - s3-object-lambda:*
+                Resource: 
+                  - !GetAtt [ DatalakeBucket, Arn ] # arn:aws:s3:::glue.staging.aws
+                  - !Join ['/', [!GetAtt [ DatalakeBucket, Arn ], '*'] ] # arn:aws:s3:::glue.staging.aws/*
+
+  PersonalizeBucketPolicy:
+    Type: 'AWS::S3::BucketPolicy'
+    Properties:
+      Bucket: !Ref DatalakeBucket
+      PolicyDocument:
+        Statement:
+          - Action: '*'
+            Condition:
+              Bool:
+                'aws:SecureTransport': false
+            Effect: Deny
+            Principal:
+              AWS: '*'
+            Resource: !Join 
+              - ''
+              - - !GetAtt 
+                  - DatalakeBucket
+                  - Arn
+                - /*
+            Sid: HttpsOnly
+          - Action:
+              - 's3:GetObject'
+              - 's3:ListBucket'
+            Effect: Allow
+            Principal:
+              Service: personalize.amazonaws.com
+            Resource:
+              - !Join 
+                - ''
+                - - !GetAtt 
+                    - DatalakeBucket
+                    - Arn
+                  - /*
+              - !GetAtt 
+                - DatalakeBucket
+                - Arn
+          - Action:
+              - 's3:GetObject'
+              - 's3:ListBucket'
+              - 's3:PutObject'
+            Effect: Allow
+            Principal:
+              Service: personalize.amazonaws.com
+            Resource:
+              - !Join 
+                - ''
+                - - !GetAtt 
+                    - DatalakeBucket
+                    - Arn
+                  - /*
+              - !GetAtt 
+                - DatalakeBucket
+                - Arn
+        Version: 2012-10-17

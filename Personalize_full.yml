@@ -1,0 +1,257 @@
+---
+    AWSTemplateFormatVersion: '2010-09-09'
+    
+    Description: IAM Policies, and resources to work with Personalize.
+    
+    Parameters:
+    
+      DataLocation:
+        Description: Data lake bucket with source data files.
+        Type: String
+        Default: s3://personalize.shakhomirov.aws/transformed/interactions/
+      JobInputPath:
+        Description: S3 path for training data.
+        Type: String
+        Default: s3://personalize.shakhomirov.aws/batch_user_input/three_user_input
+      JobOutputPath:
+        Description: S3 path for recommendations data.
+        Type: String
+        Default: s3://personalize.shakhomirov.aws/batch_user_output/
+    
+    Resources:
+    
+    ### Personalize resources ###
+    
+      PersonalizePolicy:
+        Type: AWS::IAM::Policy
+        DependsOn: PersonalizeRole
+        Properties:
+          Roles:
+            - !Ref PersonalizeRole
+          PolicyName: 'Personalize-policy'
+          PolicyDocument:
+            {
+              "Version": "2012-10-17",
+                "Statement": [
+                    {
+                        "Sid": "",
+                        "Effect": "Allow",
+                        "Action": [
+                            "s3:GetObject",
+                            "s3:ListBucket",
+                            "s3:PutObject"
+                        ],
+                        "Resource": "*"
+                    }
+              ]
+            }
+    
+      PersonalizeRole:
+        Type: AWS::IAM::Role
+        Properties:
+          AssumeRolePolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              -
+                Effect: Allow
+                Principal:
+                  Service:
+                    - "personalize.amazonaws.com"
+                Action:
+                  - "sts:AssumeRole"
+    
+      PersonalizeDatasetGroup:
+        Type: 'AWS::Personalize::DatasetGroup'
+        Properties:
+          Name: personalize-dataset-group
+    
+      # https://docs.aws.amazon.com/cli/latest/reference/personalize/create-schema.html
+      # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-personalize-schema.html
+      # https://docs.aws.amazon.com/personalize/latest/dg/data-prep-creating-datasets.html
+      PersonalizeDatasetSchema:
+        Type: AWS::Personalize::Schema
+        Properties: 
+          # Domain: String
+          Name: movie-ratings-schema
+          Schema: "{\"type\":\"record\",\"name\":\"Interactions\",\"namespace\":\"com.amazonaws.personalize.schema\",\"fields\":[{\"name\":\"USER_ID\",\"type\":\"string\"},{\"name\":\"ITEM_ID\",\"type\":\"string\"},{\"name\":\"TIMESTAMP\",\"type\":\"long\"}],\"version\":\"1.0\"}"
+          # # or like so:
+          # Schema: >-
+          #   {"type": "record","name": "Interactions", "namespace":
+          #   "com.amazonaws.personalize.schema", "fields": [ { "name": "USER_ID",
+          #   "type": "string" }, { "name": "ITEM_ID", "type": "string" }, { "name":
+          #   "TIMESTAMP", "type": "long"}], "version": "1.0"}
+    
+    ## It's better to move this into a separate stack or update will not work.
+      PersonalizeDataset:
+        DependsOn: [PersonalizePolicy, PersonalizeRole, PersonalizeDatasetGroup, PersonalizeDatasetSchema]
+        Type: 'AWS::Personalize::Dataset'
+        Properties:
+          Name: movie-ratings-dataset
+          DatasetType: Interactions
+          DatasetGroupArn: !GetAtt PersonalizeDatasetGroup.DatasetGroupArn
+          # DatasetGroupArn: 'arn:aws:personalize:eu-west-1:677619093471:dataset-group/personalize-dataset-group-name'
+    
+          SchemaArn: !GetAtt PersonalizeDatasetSchema.SchemaArn
+    
+          # SchemaArn: 'arn:aws:personalize:eu-west-1:677619093471:schema/movie-ratings-schema'
+    
+          DatasetImportJob:
+            JobName: movie-ratings-import-job
+            DataSource:
+              DataLocation: !Ref DataLocation # 's3://personalize.staging.aws/transformed/interactions/'
+    
+            RoleArn: !GetAtt PersonalizeRole.Arn
+    
+            # RoleArn: 'arn:aws:iam::677619093471:role/PersonalizeTest-PersonalizeRole-1US3AQJN0Z1J7'
+      PersonalizeSolution:
+        Type: AWS::Personalize::Solution
+        DependsOn: [PersonalizeDatasetGroup, PersonalizeDataset]
+        Properties: 
+          DatasetGroupArn: !GetAtt PersonalizeDatasetGroup.DatasetGroupArn
+          # EventType: String # The event type (for example, 'click' or 'like') that is used for training the model. If no eventType is provided, Amazon Personalize uses all interactions for training with equal weight regardless of type.
+          Name: test-personalize-movie-solution
+          # PerformAutoML: false
+          # PerformHPO: Boolean # Whether to perform hyperparameter optimization (HPO) on the chosen recipe. The default is false
+          
+          # https://docs.aws.amazon.com/personalize/latest/dg/working-with-predefined-recipes.html
+          # https://docs.aws.amazon.com/personalize/latest/dg/native-recipe-new-item-USER_PERSONALIZATION.html
+          RecipeArn: 'arn:aws:personalize:::recipe/aws-user-personalization' 
+          # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-personalize-solution-solutionconfig.html
+          # SolutionConfig: 
+          #   SolutionConfig
+    
+
+### Orchestrator resources ###
+      StatesExecutionRole:
+        Type: "AWS::IAM::Role"
+        Properties:
+          AssumeRolePolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Principal:
+                  Service:
+                    - !Sub states.${AWS::Region}.amazonaws.com
+                Action: "sts:AssumeRole"
+          Path: "/"
+          Policies:
+            - PolicyName: StatesExecutionPolicy
+              PolicyDocument:
+                Version: "2012-10-17"
+                Statement:
+                  - Effect: Allow
+                    Action:
+                      - "lambda:InvokeFunction"
+                    Resource: "*"
+                  - Effect: Allow
+                    Action:
+                      - "personalize:*"
+                    Resource: "*"
+                  - Effect: Allow
+                    Action:
+                      - "s3:*"
+                    Resource: "*"
+                  - Effect: Allow
+                    Action:
+                      - "glue:*"
+                    Resource: "*"
+
+      MyStateMachine:
+        Type: AWS::StepFunctions::StateMachine
+        Properties:
+          StateMachineName: ETL-Personalize-StateMachine
+          DefinitionString:
+            !Sub
+              - |-
+                {
+                  "Comment": "A description of my state machine",
+                  "StartAt": "CreateDatasetImportJob",
+                  "States": {
+                    "CreateDatasetImportJob": {
+                      "Type": "Task",
+                      "Parameters": {
+                        "DataSource": {
+                          "DataLocation": "${DataLocationS3}"
+                        },
+                        "DatasetArn": "${DatasetArn}",
+                        "JobName": "Movie-interactions-import-job",
+                        "RoleArn": "${PersonalizeRoleArn}"
+                      },
+                      "Resource": "arn:aws:states:::aws-sdk:personalize:createDatasetImportJob",
+                      "Next": "CreateSolutionVersion"
+                    },
+                    "CreateSolutionVersion": {
+                      "Type": "Task",
+                      "Parameters": {
+                        "SolutionArn": "${SolutionArn}"
+                      },
+                      "Resource": "arn:aws:states:::aws-sdk:personalize:createSolutionVersion",
+                      "Next": "CreateBatchInferenceJob"
+                    },
+                    "CreateBatchInferenceJob": {
+                      "Type": "Task",
+                      "Parameters": {
+                        "JobInput": {
+                          "S3DataSource": {
+                            "Path": "${JobInputPath}"
+                          }
+                        },
+                        "JobName": "MoviesBatchInferenceJob",
+                        "JobOutput": {
+                          "S3DataDestination": {
+                            "Path": "${JobOutputPath}"
+                          }
+                        },
+                        "RoleArn": "${PersonalizeRoleArn}",
+                        "SolutionVersionArn": "$.SolutionVersionArn"
+                      },
+                      "Resource": "arn:aws:states:::aws-sdk:personalize:createBatchInferenceJob",
+                      "Catch": [
+                        {
+                          "ErrorEquals": [
+                            "Personalize.ResourceInUseException"
+                          ],
+                          "Next": "Wait",
+                          "ResultPath": "$.errorMessage",
+                          "Comment": "asd"
+                        }
+                      ],
+                      "End": true
+                    },
+                    "Wait": {
+                      "Type": "Wait",
+                      "Seconds": 300,
+                      "Next": "CreateBatchInferenceJob"
+                    }
+                  }
+                }
+              - {
+                 PersonalizeRoleArn: !GetAtt [ PersonalizeRole, Arn ],
+                 DataLocationS3: !Ref DataLocation,
+                 DatasetArn: !GetAtt [PersonalizeDataset, DatasetArn],
+                 SolutionArn: !GetAtt [PersonalizeSolution, SolutionArn],
+                 JobInputPath: !Ref JobInputPath,
+                 JobOutputPath: !Ref JobOutputPath
+                }
+          RoleArn: !GetAtt [ StatesExecutionRole, Arn ]
+          Tags:
+            -
+              Key: "keyname1"
+              Value: "value1"
+    
+    
+    Outputs:
+      PersonalizeSolutionArn:
+        Value: !GetAtt PersonalizeSolution.SolutionArn
+        Export:
+          Name: !Join 
+            - ''
+            - - !Ref 'AWS::StackName'
+              - '-PersonalizeSolutionArn'
+      PersonalizeRoleArn:
+        Value: !GetAtt PersonalizeRole.Arn
+        Export:
+          Name: !Join 
+            - ''
+            - - !Ref 'AWS::StackName'
+              - '-PersonalizeRoleArn'

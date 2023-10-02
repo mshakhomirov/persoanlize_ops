@@ -1,0 +1,87 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: IAM Policies, and resources to work with Personalize.
+
+Parameters:
+
+  PersonalizeBucketName:
+    Description: Data lake bucket with source data files.
+    Type: String
+    Default: personalize.shakhomirov.aws
+
+Resources:
+  PersonalizeBucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      BucketName:
+        Ref: PersonalizeBucketName
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: SOLUTION_NAME
+          Value: personalize-solution-test
+
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Retain
+  PersonalizeBucketPolicy:
+    Type: 'AWS::S3::BucketPolicy'
+    Properties:
+      Bucket: !Ref PersonalizeBucket
+      PolicyDocument:
+        Statement:
+          - Action: '*'
+            Condition:
+              Bool:
+                'aws:SecureTransport': false
+            Effect: Deny
+            Principal:
+              AWS: '*'
+            Resource: !Join 
+              - ''
+              - - !GetAtt 
+                  - PersonalizeBucket
+                  - Arn
+                - /*
+            Sid: HttpsOnly
+          - Action:
+              - 's3:GetObject'
+              - 's3:ListBucket'
+            Effect: Allow
+            Principal:
+              Service: personalize.amazonaws.com
+            Resource:
+              - !Join 
+                - ''
+                - - !GetAtt 
+                    - PersonalizeBucket
+                    - Arn
+                  - /*
+              - !GetAtt 
+                - PersonalizeBucket
+                - Arn
+          - Action:
+              - 's3:GetObject'
+              - 's3:ListBucket'
+              - 's3:PutObject'
+            Effect: Allow
+            Principal:
+              Service: personalize.amazonaws.com
+            Resource:
+              - !Join 
+                - ''
+                - - !GetAtt 
+                    - PersonalizeBucket
+                    - Arn
+                  - /*
+              - !GetAtt 
+                - PersonalizeBucket
+                - Arn
+        Version: 2012-10-17

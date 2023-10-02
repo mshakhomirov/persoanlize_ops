@@ -1,0 +1,49 @@
+{
+
+  "type": "record",
+  "name": "Interactions",
+  "namespace": "com.amazonaws.personalize.schema",
+  "fields": [
+      {
+          "name": "USER_ID",
+          "type": "string"
+      },
+      {
+          "name": "ITEM_ID",
+          "type": "string"
+      },
+      {
+          "name": "EVENT_TYPE",
+          "type": "string"
+      },
+      {
+          "name": "EVENT_VALUE",
+          "type": [
+             "float",
+             "null"
+          ]
+      },
+      {
+          "name": "LOCATION",
+          "type": "string",
+          "categorical": true
+      },
+      {
+          "name": "DEVICE",
+          "type": [
+              "string",
+              "null"
+          ],
+          "categorical": true
+      },
+      {
+          "name": "TIMESTAMP",
+          "type": "long"
+      },
+      {
+          "name": "IMPRESSION",
+          "type": "string"
+      }
+  ],
+  "version": "1.0"
+}
